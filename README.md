@@ -5,6 +5,7 @@
 ### *Enhancing Model Metacognition via Cognitive Pairwise Training*
 
 [![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-B31B1B.svg)](https://arxiv.org/abs/XXXX.XXXXX)
+[![Paper PDF](https://img.shields.io/badge/Paper-PDF-EA4335.svg)](./paper.pdf)
 [![Status](https://img.shields.io/badge/Status-Preprint-743482.svg)]()
 [![Scales](https://img.shields.io/badge/Models-3B%20→%2032B-743482.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-2E8B57.svg)]()
