@@ -23,7 +23,7 @@
 </tr>
 <tr>
 <td align="center"><sub><b>The abstention task.</b></sub></td>
-<td align="center"><sub><b>CPT pipeline overview.</b></sub></td>
+<td align="center"><sub><b>CPT Method illustration.</b></sub></td>
 </tr>
 </table>
 
