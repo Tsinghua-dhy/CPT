@@ -12,7 +12,7 @@
 
 **Tsinghua University**
 
-<sub><i>RLVR makes LLMs smarter — but also more overconfident. CPT teaches them when <b>not</b> to answer.</i></sub>
+<sub><i>A pairwise mid-training stage that preserves abstention through RLVR.</i></sub>
 
 <br/>
 
@@ -31,38 +31,44 @@
 
 ---
 
-## 🎯 The Problem — RL Collapses Metacognition
+## 🎯 Problem: RL Collapses Abstention
 
-RLVR is the standard recipe for boosting LLM reasoning, but it comes with a hidden cost: **models lose the ability to abstain**. After RL, they confidently answer questions they should refuse.
+After RLVR, models tend to answer questions they previously declined. On Llama-3.2-3B, vanilla SFT+RL drops Abstention Recall by 17.2 pp under the Normal Prompt and 13.6 pp under the Abstention Prompt.
 
 <div align="center">
   <img src="figures/readme_fig1b_rl_collapse.png" width="62%" alt="RL collapses abstention on Llama-3.2-3B"/>
   <br/>
-  <sub><b>Figure 1(b).</b> On Llama-3.2-3B, vanilla SFT+RL drops Abstention Recall by <b>−17.2 pp</b> under the Normal Prompt and <b>−13.6 pp</b> under the Abstention Prompt.</sub>
+  <sub><b>Figure 1(b).</b> Abstention Recall before vs. after Math-RL, Llama-3.2-3B.</sub>
 </div>
-
-> CPT cuts both losses by **~3×**.
 
 | Mid-training (3B) | Normal F1 (pre → post-RL) | ΔF1 | Recall (pre → post) | ΔRecall |
 |:--|:--:|:--:|:--:|:--:|
 | Vanilla SFT       | 60.3 → 45.4 | −14.9 | 48.0 → 30.8 | −17.2 |
 | **CPT (ours)**    | 61.4 → 56.5 | **−4.9**  | 50.0 → 42.6 | **−7.4** |
 
-The same pattern holds at every scale. At **14B**, CPT is the only mid-training that keeps F1 *stable* (+0.6) and Recall *up* (+0.4) after RL.
+The same pattern holds at 4B, 8B, and 14B; at 14B, CPT is the only mid-training whose Normal F1 and Recall do not decrease after RL (ΔF1 = +0.6, ΔRecall = +0.4).
 
 ---
 
 ## 💡 The Idea — Pairwise Mid-Training
 
-Instead of point-wise scores, we supervise the model with **pairwise comparisons** of reasoning traces. It internalizes a **reusable reasoning-quality boundary** that transfers to its own generations, enabling calibrated self-assessment.
+CPT supervises the model with pairwise comparisons of reasoning traces rather than point-wise scores. Given a problem $x$, its reference answer $a^*$, and two candidate traces $\tau^A, \tau^B$, the model is trained to output a short comparative analysis and a relative-quality label. This pairwise objective is inserted as a mid-training stage between the pretrained LLM and the standard Math-SFT → Math-RL recipe.
+
+**Two views of CPT.** The training-recipe view shows *where* CPT plugs into the stack; the method view (Fig. 2 of the paper) shows *what* CPT actually optimizes — a pairwise reasoning-comparison objective built from multi-model rollouts, debiased pair construction, and self-consistent teacher labels.
 
 <div align="center">
   <img src="figures/readme_pipeline.png" width="92%" alt="CPT training pipeline"/>
   <br/>
-  <sub><b>Pipeline.</b> CPT is a pairwise SFT mid-training stage inserted between the pretrained LLM and the standard Math-SFT → Math-RL recipe.</sub>
+  <sub><b>Figure 2(i). Training pipeline.</b> CPT is a pairwise SFT mid-training stage inserted between the pretrained LLM and the Math-SFT → Math-RL recipe.</sub>
 </div>
 
-Full method details: [`method_summary.md`](./method_summary.md)
+<br/>
+
+<div align="center">
+  <img src="figures/readme_method_overview.png" width="96%" alt="CPT method overview (paper Fig. 2)"/>
+  <br/>
+  <sub><b>(ii) Method overview (paper Fig. 2).</b> A difficulty-balanced problem pool feeds <i>multi-model rollouts</i> (Qwen3-4B / 8B / 14B Base), which are then assembled into <i>debiased trace pairs</i> (Intra-Model · Inter-Model · Small-correct vs. Large-wrong) and assigned <i>self-consistent teacher labels</i> (Qwen3-235B, 8 rounds × 4 axes). The resulting pairwise comparison task trains <i>f<sub>θ</sub></i> to internalize a reusable criterion for reasoning quality before downstream task-specific optimization.</sub>
+</div>
 
 ---
 
@@ -91,11 +97,11 @@ Within each scale block, **CPT+RL is the only method that simultaneously wins on
 
 ---
 
-## 🔬 Beyond Headline Numbers
+## 🔬 Further Analyses
 
-### 1. Higher Trace Quality at Matched Correctness (14B Pairwise Judge)
+### 1. Trace Quality at Matched Correctness (14B, Qwen3-235B pairwise judge)
 
-Even when **both** CPT-RL and SFT-RL get the wrong answer, a Qwen3-235B judge prefers CPT-RL's trace 64.6% of the time — rising to **83.0%** on AIME-25 hard cases.
+On 247 consensus non-tie pairs of CPT-RL vs. SFT-RL traces, a Qwen3-235B judge prefers CPT-RL 55.9% of the time overall. The gap is concentrated on the `both_wrong` slice (64.6%) and the hardest subset (AIME-25 ∩ `both_wrong`, 83.0%), indicating that when CPT-RL fails it tends to fail with more structured reasoning rather than fabricated derivations.
 
 | Slice | $n$ | **Position-debiased win-rate (Ours)** |
 |:--|:--:|:--:|
@@ -104,17 +110,15 @@ Even when **both** CPT-RL and SFT-RL get the wrong answer, a Qwen3-235B judge pr
 | `both_wrong`                           | 103 | **64.6%** |
 | AIME-25 & `both_wrong` (hardest slice) |  36 | **83.0%** |
 
-> CPT-RL fails *more structured*, less fabricated reasoning — exactly the trait needed for reliable abstention.
-
 <div align="center">
   <img src="figures/readme_case_study.png" width="92%" alt="Pairwise case study: rotated parabola"/>
   <br/>
-  <sub><b>Case study (AIME-2025, both_wrong).</b> Both predictions are wrong (69 vs. 70; GT = 62), but the judge prefers <b>Ours</b> 7/8 at <i>Very High</i> confidence: it has the correct quartic structure, while the baseline introduces a coefficient error and concludes by guessing.</sub>
+  <sub><b>Case study (AIME-2025, both_wrong).</b> Both predictions are wrong (69 vs. 70; ground truth = 62). The judge prefers Ours 7/8 at <i>Very High</i> confidence: Ours derives the correct quartic structure; the baseline introduces a coefficient error and concludes by guessing.</sub>
 </div>
 
-### 2. Cross-Task Generalization to RAG (zero-shot, 4B on *DRAGged-into-Conflicts*)
+### 2. Zero-shot Transfer to RAG (4B on *DRAGged-into-Conflicts*)
 
-No RAG training, no task-specific tuning — CPT still leads.
+The 4B CPT+RL checkpoint is evaluated on RAG abstention without any RAG-specific training.
 
 | Model (4B)        | Normal | Outdated-info | Conflict (abstain) | **All (best-of-8)** |
 |:--|:--:|:--:|:--:|:--:|
@@ -125,7 +129,7 @@ No RAG training, no task-specific tuning — CPT still leads.
 
 ### 3. Closed-Loop Self-Distillation (32B replaces 235B teacher)
 
-The recipe is **fully reproducible in-house** — a 32B CPT checkpoint can re-label its own training data and match (or beat) the 235B teacher.
+A 32B CPT checkpoint re-labels its own pairwise training data and is used as the teacher for a fresh CPT run. The resulting 32B model matches the original Qwen3-235B–taught checkpoint on math and Normal-F1, removing the dependency on a closed-source teacher.
 
 | Teacher | Math Avg | Normal-F1 | Abs.-F1 |
 |:--|:--:|:--:|:--:|
@@ -135,23 +139,7 @@ The recipe is **fully reproducible in-house** — a 32B CPT checkpoint can re-la
 
 ### 4. CPT-Data Ablations — robust and redundant
 
-Removing **any single** pair-construction strategy (T1 / T2 / T3) or **self-consistency** filtering degrades performance, but every ablation still beats vanilla SFT — meaning the three pair strategies provide complementary signal, and SC filtering is most critical for smaller models.
-
----
-
-## 🖼️ Figures Used in This README
-
-All images live under [`figures/`](./figures/) and are referenced with relative paths, so GitHub will render them out of the box.
-
-| File | Purpose | Where it appears |
-|:--|:--|:--|
-| `figures/fig_a_padded.png`             | "The abstention task" cartoon (Fig. 1a, height-padded) | Hero image, left |
-| `figures/fig_c.png`                    | High-level CPT illustration (Fig. 1c)               | Hero image, right |
-| `figures/readme_fig1b_rl_collapse.png` | Fig. 1(b) — RL collapses abstention on Llama-3.2-3B | "The Problem" section |
-| `figures/readme_pipeline.png`          | CPT training pipeline overview                      | "The Idea" section |
-| `figures/readme_case_study.png`        | AIME-2025 pairwise case study (rotated parabola)    | "Beyond Headline Numbers" |
-
-> 💡 *Want extra visuals (e.g. RAG-transfer bar chart, win-rate radar, scaling curve)? Tell me which numbers to highlight and I'll generate matching PNGs in the same palette.*
+Removing any single pair-construction strategy (T1 / T2 / T3) or the self-consistency filter degrades performance, but every ablation still outperforms vanilla SFT. The three pair strategies contribute non-overlapping signal; the self-consistency filter has the largest effect at smaller scales.
 
 ---
 
@@ -163,7 +151,7 @@ All images live under [`figures/`](./figures/) and are referenced with relative 
 ├── figures/                     # README figures
 ```
 
-> 📄 Paper PDF / LaTeX source will be linked to arXiv once posted.
+LaTeX/arxiv source will be linked once the arXiv version is posted.
 
 ---
 
