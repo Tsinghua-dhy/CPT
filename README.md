@@ -190,7 +190,8 @@ Naming: `CPT-{Method}-{Base}` (e.g. `CPT-RL-*` is the main CPT method; `CPT-SFT-
 
 | Dataset | Stage | Content |
 |---|:--:|---|
-| [`CPT-Source-8556`](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Source-8556)             | 1 | 8,556 difficulty-balanced math problems |
+| [`CPT-Source-8556`](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Source-8556)             | 1 | 8,556 difficulty-balanced math problems (DAPO+SimpleRL pool, paper Pool 2) |
+| [`CPT-Source-OpenMath-33K`](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Source-OpenMath-33K) | 1 | 33,801 audited OpenMath problems — source pool for the CPT 2× extension (paper Pool 3, Appendix G.2) |
 | [`CPT-Pairs-90K`](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Pairs-90K)                 | 2 | 90,970 trace pairs (Intra / Inter / Counter-intuitive) |
 | [`CPT-Pairs-Judged-77K`](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Pairs-Judged-77K)   | 3 | 77,657 consensus-judged pairs (slim) |
 | [`CPT-SFT-70K`](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-SFT-70K)                     | 4 | 70,352 mid-training SFT samples |
@@ -405,12 +406,6 @@ Paper §B.1.2:
 - `abstention_judge.py` — reward for the `Abs-RL` baseline; combines `math_verify` on answerable items with string match on the abstention phrases inside `\boxed{}` for unanswerable / false-premise items.
 - `math_verify.py` — augments rule-based math equivalence with a `gpt-4.1-mini` LLM-judge fallback (matches paper §B.1.2: *"`math_verify` first, with GPT-4.1-mini semantic equivalence as fallback when enabled by the data source"*). Controlled via `OPENAI_API_KEY` / `OPENAI_BASE_URL`.
 - Reward magnitudes are env-configurable: `VERL_ANSWER_REWARD` (default 1.0) and `VERL_FORMAT_REWARD` (default 0.2).
-
-### Cleanup
-
-We also removed local artifacts that are not part of upstream verl:
-`logs/`, `wandb_logs/`, `data/`, `examples/sft/`, `examples/myscripts/`,
-`examples/data_preprocess/`. The snapshot is ~5 MB.
 
 ---
 

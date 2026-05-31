@@ -38,7 +38,8 @@ directory entirely:
 
 | Dataset                                                                                               | Content              |
 |-------------------------------------------------------------------------------------------------------|-----------------------|
-| [Tsinghuadhy/CPT-Source-8556](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Source-8556)         | Stage 1 problem pool  |
+| [Tsinghuadhy/CPT-Source-8556](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Source-8556)         | Stage 1 problem pool (Pool 2: DAPO + SimpleRL, 8,556) |
+| [Tsinghuadhy/CPT-Source-OpenMath-33K](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Source-OpenMath-33K) | Stage 1 problem pool (Pool 3: audited OpenMath, 33,801; paper §B.4.1 / Appendix G.2) — sampled down to 8K for the CPT 2× extension |
 | [Tsinghuadhy/CPT-Pairs-90K](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Pairs-90K)             | Stage 2 raw pairs     |
 | [Tsinghuadhy/CPT-Pairs-Judged-77K](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-Pairs-Judged-77K) | Stage 3 consensus pairs |
 | [Tsinghuadhy/CPT-SFT-70K](https://www.modelscope.cn/datasets/Tsinghuadhy/CPT-SFT-70K)                 | Stage 4 SFT split     |
