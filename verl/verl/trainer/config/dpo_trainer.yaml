@@ -1,0 +1,20 @@
+# DPO Trainer config — inherits from sft_trainer.yaml and adds DPO-specific fields
+defaults:
+  - sft_trainer
+  - _self_
+
+data:
+  # DPO-specific keys
+  prompt_key: prompt
+  chosen_key: chosen
+  rejected_key: rejected
+  # Override defaults
+  truncation: right
+  use_chat_template: False
+
+# DPO algorithm hyperparameters
+dpo:
+  beta: 0.1
+  loss_type: sigmoid        # sigmoid or ipo
+  label_smoothing: 0.0
+  reference_free: False     # if True, skip reference model (not recommended)

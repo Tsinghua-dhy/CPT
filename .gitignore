@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Local artifacts
+checkpoints/
+outputs/
+wandb/
+logs/
+
+# Large data not committed (download from ModelScope, see data/README.md)
+data/cpt_sft/
+data/math_sft_80k/
+data/abstention_sft/
+data/dpo_baseline/
+eval/dataset/
+eval/outputs/
+
+# Local secrets
+.secrets/
+*.env
