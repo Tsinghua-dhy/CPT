@@ -24,6 +24,7 @@ import copy
 import json
 import os
 import re
+import sys
 import time
 
 from tqdm import tqdm
@@ -32,6 +33,9 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
+
+# Make eval/utils/ importable so we can reuse `metric_calc_rule.py`
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils'))
 
 from metric_calc_rule import (
     exact_match_score,
@@ -96,15 +100,6 @@ def parse_args():
         help="Force using chat template. If not set, auto-detect based on model name.",
     )
     parser.add_argument("--tag", type=str, default="", help="Optional tag for output file name")
-    parser.add_argument(
-        "--prompt_variant",
-        type=str,
-        nargs="+",
-        default=["D"],
-        choices=["A", "B", "C", "D"],
-        help="One or more user-prompt variants to evaluate. The model is loaded once "
-             "and reused across all variants. e.g. --prompt_variant A B C D",
-    )
     return parser.parse_args()
 
 
@@ -115,36 +110,10 @@ def is_instruct_model(model_name: str) -> bool:
 
 
 # ============================================================================
-#  3. Prompt construction (the model itself recognizes the three task types) 
-#     Four variants A / B / C / D, selected via --prompt_variant; 
-#     D is the original verbose "Decision Procedure" version, kept as a baseline. 
+#  3. Prompt construction (the model itself recognizes the three task types)
 # ============================================================================
 
-# ---------- Variant A: emphasises "is the question itself under-specified?" ----------
-USER_PROMPT_A = """Answer the following question using the given reference documents. You may also use your own world knowledge.
-
-IMPORTANT: First check whether the question is well-specified enough to have ONE correct answer.
-
-You MUST abstain (output \\boxed{{I don't know}}) if ANY of the following is true:
-  - The question is missing a context that the answer depends on (country, time, version, person, etc.), AND the references describe more than one such case (e.g. multiple countries, multiple eras).
-  - The references reflect ongoing debate, contradictory research outcomes, or differing opinions, with no clearly correct side.
-  - Even with your own world knowledge, there is no single agreed-upon answer.
-
-Otherwise:
-  - If references conflict only because some are outdated, pick the most up-to-date answer.
-  - Otherwise answer normally.
-
-Final-answer format -- give your reasoning first, then put a SHORT answer inside \\boxed{{...}} (an entity name, a number, a short phrase, or exactly "I don't know"). Do NOT put your reasoning inside the box.
-  Examples: \\boxed{{Operation Market Garden}} | \\boxed{{1964}} | \\boxed{{Euro}} | \\boxed{{I don't know}}
-
-Question: {question}
-
-References:
-{reference_text}
-"""
-
-# ---------- Variant B: reverses the decision order + defaults to abstaining ----------
-USER_PROMPT_B = """Answer the following question. You are given reference documents and may also use your own knowledge.
+USER_PROMPT = """Answer the following question. You are given reference documents and may also use your own knowledge.
 
 Decision rule (apply IN ORDER):
   1. Look at the question and references. Ask yourself: "Across the references and my own knowledge, is there ONE single answer that essentially everyone would agree on?"
@@ -164,82 +133,8 @@ References:
 {reference_text}
 """
 
-# ---------- Variant C: few-shot, with 3 judgement demos ----------
-USER_PROMPT_C = """Answer the question using the references and your own knowledge. Some questions are NOT answerable -- if so, you must output \\boxed{{I don't know}}.
 
-A question is NOT answerable when:
-  - It lacks a context that the answer depends on (country, time, version, ...), and references describe multiple such cases.
-  - The references / world have no consensus (debate, conflicting research, conflicting opinions).
-Otherwise, give the correct short answer (resolving outdated info by picking the latest source).
-
-Here are short examples of the decision (illustrative only -- not from the test set):
-
-Example 1
-Q: who is the head of state
-References mention monarchs and presidents of several countries (UK, France, Japan, Brazil, ...).
-Decision: The question doesn't specify a country, and references describe several. NOT answerable.
-Final: \\boxed{{I don't know}}
-
-Example 2
-Q: What is the world's most populous country?
-References: older sources say "China"; the latest census data says "India" (since 2023).
-Decision: Outdated-vs-current conflict. The latest source says India.
-Final: \\boxed{{India}}
-
-Example 3
-Q: How many planets are there in our Solar System?
-References consistently list the eight major planets (Mercury through Neptune).
-Decision: Single agreed answer.
-Final: \\boxed{{8}}
-
-Now solve the real one. Give your reasoning first, then put a SHORT answer in \\boxed{{...}} -- entity, number, short phrase, or exactly "I don't know". Do NOT put your reasoning or a full sentence of explanation inside the box.
-
-Question: {question}
-
-References:
-{reference_text}
-"""
-
-# ---------- Variant D: the original verbose "Decision Procedure" (baseline) ----------
-USER_PROMPT_D = """You are given a question together with a set of reference documents retrieved from the web. Your job is to answer the question correctly while detecting two special situations.
-
-## Decision Procedure
-
-Step 1. Read the question and the references carefully. You may also rely on your own world knowledge when the references are unhelpful or contradicted by well-established facts.
-
-Step 2. Decide which of the following THREE situations the question falls into:
-
-  (A) **Outdated-information conflict**: The references contain information that conflicts with each other because some sources are *out of date* (e.g. an old fact vs. an up-to-date fact, different dates, superseded statistics). In this case the question DOES have a correct answer — you should pick the most recent / most reliable information and answer it.
-
-  (B) **Genuine disagreement / no consensus**: The references reflect *different opinions*, *contradictory research outcomes*, *complementary but inconsistent facts*, or in general there is **no single agreed-upon answer**. (You may also use your own world knowledge to confirm this — if the world itself has not converged on a single answer, this case applies.) In this case the question is NOT answerable; you MUST abstain.
-
-  (C) **Normal answerable question**: The references (and/or your knowledge) consistently support a single answer, with no conflict or only trivial misinformation that can be safely ignored. Answer it normally.
-
-Step 3. Produce your final answer:
-  - For (A) and (C): give the correct answer.
-  - For (B): abstain. Output exactly: \\boxed{{I don't know}}
-
-Give your reasoning first and then put a SHORT answer inside \\boxed{{...}} -- an entity name, a number, a short phrase, or exactly "I don't know". Do NOT put your reasoning or a full sentence of explanation inside the box.
-
-- Answerable example:  \\boxed{{Operation Market Garden}}  or  \\boxed{{1964}}  or  \\boxed{{Euro}}
-- Abstain example (situation 2):  \\boxed{{I don't know}}
-
-## Question
-{question}
-
-## References
-{reference_text}
-"""
-
-PROMPT_VARIANTS = {
-    "A": USER_PROMPT_A,
-    "B": USER_PROMPT_B,
-    "C": USER_PROMPT_C,
-    "D": USER_PROMPT_D,
-}
-
-
-def process_text(example, tokenizer, use_chat_template: bool = False, prompt_variant: str = "D"):
+def process_text(example, tokenizer, use_chat_template: bool = False):
     """Build the prompt. Base models reuse the training User:/Assistant: shell."""
     question_raw = example["question"]
 
@@ -250,8 +145,7 @@ def process_text(example, tokenizer, use_chat_template: bool = False, prompt_var
             reference_parts.append(f"[{i + 1}] {short_text}")
     reference_text = "\n\n".join(reference_parts) if reference_parts else "(no reference document)"
 
-    template = PROMPT_VARIANTS.get(prompt_variant, USER_PROMPT_D)
-    user_prompt = template.format(question=question_raw, reference_text=reference_text)
+    user_prompt = USER_PROMPT.format(question=question_raw, reference_text=reference_text)
 
     prompt = None
     if use_chat_template:
@@ -467,7 +361,6 @@ def main():
 
     rollout_num = args.rollout_num
     print(f"Rollout number: {rollout_num}")
-    print(f"Prompt variants: {args.prompt_variant}")
 
     # ==== Load data (keep all 5 conflict_types, group into 3 task types) ====
     print(f"\nLoading data from: {args.data_file}")
@@ -495,231 +388,197 @@ def main():
     for k, v in conflict_dist.items():
         print(f"  {k}: {v}")
 
-    # Collect overall metrics for each variant; print at the end
-    all_variants_summary = {}
+    t_run = time.time()
 
-    # ====== Inner loop: run each prompt variant once, sharing a single LLM ======
-    for variant in args.prompt_variant:
-        t_variant = time.time()
-        print("\n" + "#" * 80)
-        print(f"#  Prompt variant = {variant}")
-        print("#" * 80)
+    # ---- generation ----
+    print(f"Generating {rollout_num} rollouts × {len(data_ori_all)} questions ...")
+    data = [copy.deepcopy(it) for it in data_ori_all]
+    for it in data:
+        process_text(it, tokenizer, use_chat_template=use_chat_template)
 
-        # ---- generation ----
-        print(f"Generating {rollout_num} rollouts × {len(data_ori_all)} questions ...")
-        data = [copy.deepcopy(it) for it in data_ori_all]
-        for it in data:
-            process_text(it, tokenizer, use_chat_template=use_chat_template,
-                         prompt_variant=variant)
+    prompts = []
+    prompt_to_qr = []  # (q_idx, rollout_idx)
+    for qi, it in enumerate(data):
+        for r in range(rollout_num):
+            prompts.append(it["chat_prompt"])
+            prompt_to_qr.append((qi, r))
 
-        prompts = []
-        prompt_to_qr = []  # (q_idx, rollout_idx)
-        for qi, it in enumerate(data):
-            for r in range(rollout_num):
-                prompts.append(it["chat_prompt"])
-                prompt_to_qr.append((qi, r))
+    sampling_params = SamplingParams(
+        temperature=args.temp,
+        top_p=args.top_p,
+        top_k=args.top_k,
+        max_tokens=args.max_tokens,
+        stop=["<|im_end|>", "<|endoftext|>"],
+    )
+    print(f"Total prompts: {len(prompts)}")
+    outputs = llm.generate(prompts, sampling_params)
 
-        sampling_params = SamplingParams(
-            temperature=args.temp,
-            top_p=args.top_p,
-            top_k=args.top_k,
-            max_tokens=args.max_tokens,
-            stop=["<|im_end|>", "<|endoftext|>"],
+    rollouts = defaultdict(list)
+    for out_idx, out in enumerate(outputs):
+        q_idx, r_idx = prompt_to_qr[out_idx]
+        gen_text = out.outputs[0].text.strip()
+        pred = extract_answer_rag(gen_text)
+        rollouts[q_idx].append(
+            {
+                "rollout_idx": r_idx,
+                "pred_ans": pred,
+                "gen_text_store": gen_text,
+            }
         )
-        print(f"Total prompts: {len(prompts)}")
-        outputs = llm.generate(prompts, sampling_params)
 
-        rollouts = defaultdict(list)
-        for out_idx, out in enumerate(outputs):
-            q_idx, r_idx = prompt_to_qr[out_idx]
-            gen_text = out.outputs[0].text.strip()
-            pred = extract_answer_rag(gen_text)
-            rollouts[q_idx].append(
+    # ---- Eval: abstention via rules; everything else via LLM-judge ----
+    print("\n== Evaluating ==")
+    eval_items = []
+    eval_map = []  # (q_idx, r_idx)
+
+    for q_idx, item in enumerate(data):
+        ttype = item["task_type"]
+        for r in rollouts[q_idx]:
+            r["abstained"] = is_abstain(r["pred_ans"])
+            if ttype == "abstain":
+                r["correct"] = bool(r["abstained"])
+                r["judge_score"] = float(r["correct"])
+                r["judge_raw"] = (
+                    "abstain rule: abstained -> correct"
+                    if r["abstained"]
+                    else "abstain rule: not abstained -> wrong"
+                )
+                r["judge_reason"] = ""
+            else:
+                if r["abstained"]:
+                    r["correct"] = False
+                    r["judge_score"] = 0.0
+                    r["judge_raw"] = "answerable rule: model abstained -> wrong"
+                    r["judge_reason"] = ""
+                else:
+                    eval_items.append(
+                        {
+                            "question": item["question"],
+                            "answer": item.get("correct_answer", ""),
+                            "pred_ans": r["pred_ans"],
+                        }
+                    )
+                    eval_map.append((q_idx, r["rollout_idx"]))
+
+    print(f"  abstain items judged directly; {len(eval_items)} answerable rollouts dispatched to LLM-as-judge")
+    judge_results = llm_judge_batch(eval_items)
+    for i, jr in enumerate(judge_results):
+        q_idx, r_idx = eval_map[i]
+        for r in rollouts[q_idx]:
+            if r["rollout_idx"] == r_idx:
+                r["correct"] = bool(jr["score"] >= 1.0)
+                r["judge_score"] = float(jr["score"])
+                r["judge_raw"] = jr["raw_response"]
+                r["judge_reason"] = jr["reason"]
+                break
+
+    # ---- Aggregate metrics ----
+    by_task = defaultdict(
+        lambda: {"avg": [], "majority": 0, "best": 0, "count": 0}
+    )
+    overall_avg, overall_maj, overall_best, n_q = 0.0, 0, 0, 0
+
+    detailed = []
+    for q_idx, item in enumerate(data):
+        rs = rollouts[q_idx]
+        scores = [r["judge_score"] for r in rs]
+        avg = float(np.mean(scores)) if scores else 0.0
+        majority = 1 if avg > 0.5 else 0
+        best = 1 if (max(scores) if scores else 0) >= 1.0 else 0
+
+        ttype = item["task_type"]
+        by_task[ttype]["avg"].append(avg)
+        by_task[ttype]["majority"] += majority
+        by_task[ttype]["best"] += best
+        by_task[ttype]["count"] += 1
+        overall_avg += avg
+        overall_maj += majority
+        overall_best += best
+        n_q += 1
+
+        for r in rs:
+            detailed.append(
                 {
-                    "rollout_idx": r_idx,
-                    "pred_ans": pred,
-                    "gen_text_store": gen_text,
+                    "question_idx": q_idx,
+                    "rollout_idx": r["rollout_idx"],
+                    "question": item["question"],
+                    "correct_answer": item.get("correct_answer", ""),
+                    "conflict_type": item.get("conflict_type", ""),
+                    "task_type": ttype,
+                    "pred_ans": r["pred_ans"],
+                    "abstained": r["abstained"],
+                    "correct": r["correct"],
+                    "judge_score": r["judge_score"],
+                    "judge_raw": r["judge_raw"],
+                    "judge_reason": r["judge_reason"],
+                    "gen_text_store": r["gen_text_store"],
                 }
             )
 
-        # ---- Eval: abstention via rules; everything else via LLM-judge ----
-        print("\n== Evaluating ==")
-        eval_items = []
-        eval_map = []  # (q_idx, r_idx)
+    def _safe_div(a, b):
+        return float(a) / b if b else 0.0
 
-        for q_idx, item in enumerate(data):
-            ttype = item["task_type"]
-            for r in rollouts[q_idx]:
-                r["abstained"] = is_abstain(r["pred_ans"])
-                if ttype == "abstain":
-                    r["correct"] = bool(r["abstained"])
-                    r["judge_score"] = float(r["correct"])
-                    r["judge_raw"] = (
-                        "abstain rule: abstained -> correct"
-                        if r["abstained"]
-                        else "abstain rule: not abstained -> wrong"
-                    )
-                    r["judge_reason"] = ""
-                else:
-                    if r["abstained"]:
-                        r["correct"] = False
-                        r["judge_score"] = 0.0
-                        r["judge_raw"] = "answerable rule: model abstained -> wrong"
-                        r["judge_reason"] = ""
-                    else:
-                        eval_items.append(
-                            {
-                                "question": item["question"],
-                                "answer": item.get("correct_answer", ""),
-                                "pred_ans": r["pred_ans"],
-                            }
-                        )
-                        eval_map.append((q_idx, r["rollout_idx"]))
-
-        print(f"  abstain items judged directly; {len(eval_items)} answerable rollouts dispatched to LLM-as-judge")
-        judge_results = llm_judge_batch(eval_items)
-        for i, jr in enumerate(judge_results):
-            q_idx, r_idx = eval_map[i]
-            for r in rollouts[q_idx]:
-                if r["rollout_idx"] == r_idx:
-                    r["correct"] = bool(jr["score"] >= 1.0)
-                    r["judge_score"] = float(jr["score"])
-                    r["judge_raw"] = jr["raw_response"]
-                    r["judge_reason"] = jr["reason"]
-                    break
-
-        # ---- Aggregate metrics ----
-        by_task = defaultdict(
-            lambda: {"avg": [], "majority": 0, "best": 0, "count": 0}
-        )
-        overall_avg, overall_maj, overall_best, n_q = 0.0, 0, 0, 0
-
-        detailed = []
-        for q_idx, item in enumerate(data):
-            rs = rollouts[q_idx]
-            scores = [r["judge_score"] for r in rs]
-            avg = float(np.mean(scores)) if scores else 0.0
-            majority = 1 if avg > 0.5 else 0
-            best = 1 if (max(scores) if scores else 0) >= 1.0 else 0
-
-            ttype = item["task_type"]
-            by_task[ttype]["avg"].append(avg)
-            by_task[ttype]["majority"] += majority
-            by_task[ttype]["best"] += best
-            by_task[ttype]["count"] += 1
-            overall_avg += avg
-            overall_maj += majority
-            overall_best += best
-            n_q += 1
-
-            for r in rs:
-                detailed.append(
-                    {
-                        "question_idx": q_idx,
-                        "rollout_idx": r["rollout_idx"],
-                        "question": item["question"],
-                        "correct_answer": item.get("correct_answer", ""),
-                        "conflict_type": item.get("conflict_type", ""),
-                        "task_type": ttype,
-                        "pred_ans": r["pred_ans"],
-                        "abstained": r["abstained"],
-                        "correct": r["correct"],
-                        "judge_score": r["judge_score"],
-                        "judge_raw": r["judge_raw"],
-                        "judge_reason": r["judge_reason"],
-                        "gen_text_store": r["gen_text_store"],
-                    }
-                )
-
-        def _safe_div(a, b):
-            return float(a) / b if b else 0.0
-
-        by_task_results = {}
-        for k in TASK_TYPES_ORDER:
-            v = by_task[k]
-            by_task_results[k] = {
-                "count": v["count"],
-                "avg_acc": _safe_div(sum(v["avg"]), v["count"]),
-                "majority_acc": _safe_div(v["majority"], v["count"]),
-                "best_acc": _safe_div(v["best"], v["count"]),
-            }
-
-        overall = {
-            "rollout_num": rollout_num,
-            "num_questions": n_q,
-            "total_generations": len(detailed),
-            "prompt_variant": variant,
-            "avg_acc": _safe_div(overall_avg, n_q),
-            "majority_acc": _safe_div(overall_maj, n_q),
-            "best_acc": _safe_div(overall_best, n_q),
-            "query_latency_ms_per_gen": (
-                f"{(time.time() - t_variant) / max(len(detailed), 1) * 1000:.1f}"
-            ),
+    by_task_results = {}
+    for k in TASK_TYPES_ORDER:
+        v = by_task[k]
+        by_task_results[k] = {
+            "count": v["count"],
+            "avg_acc": _safe_div(sum(v["avg"]), v["count"]),
+            "majority_acc": _safe_div(v["majority"], v["count"]),
+            "best_acc": _safe_div(v["best"], v["count"]),
         }
 
-        final = {"overall": overall, "by_task_type": by_task_results}
+    overall = {
+        "rollout_num": rollout_num,
+        "num_questions": n_q,
+        "total_generations": len(detailed),
+        "avg_acc": _safe_div(overall_avg, n_q),
+        "majority_acc": _safe_div(overall_maj, n_q),
+        "best_acc": _safe_div(overall_best, n_q),
+        "query_latency_ms_per_gen": (
+            f"{(time.time() - t_run) / max(len(detailed), 1) * 1000:.1f}"
+        ),
+    }
 
-        # ---- Print ----
-        print("\n" + "=" * 80)
-        print(f"[Variant {variant}] Overall  ({rollout_num}-rollout, {n_q} questions)")
-        print(f"  Avg Acc      : {overall['avg_acc']:.4f}")
-        print(f"  Majority Acc : {overall['majority_acc']:.4f}")
-        print(f"  Best-of-N Acc: {overall['best_acc']:.4f}")
-        print("-" * 80)
-        print(f"{'task_type':<22} | {'count':>5} | {'avg':>7} | {'major':>7} | {'best':>7}")
-        print("-" * 80)
-        for k in TASK_TYPES_ORDER:
-            r = by_task_results[k]
-            print(
-                f"{k:<22} | {r['count']:>5d} | {r['avg_acc']:>7.4f} | "
-                f"{r['majority_acc']:>7.4f} | {r['best_acc']:>7.4f}"
-            )
-        print("=" * 80)
+    final = {"overall": overall, "by_task_type": by_task_results}
 
-        # ---- save ----
-        t = time.localtime()
-        tag = f".{args.tag}" if args.tag else ""
-        base_name = (
-            f"rag_conflicts.{t.tm_mon}.{t.tm_mday},{t.tm_hour}:{t.tm_min}"
-            f".rollout{rollout_num}.prompt{variant}{tag}"
+    # ---- Print ----
+    print("\n" + "=" * 80)
+    print(f"Overall  ({rollout_num}-rollout, {n_q} questions)")
+    print(f"  Avg Acc      : {overall['avg_acc']:.4f}")
+    print(f"  Majority Acc : {overall['majority_acc']:.4f}")
+    print(f"  Best-of-N Acc: {overall['best_acc']:.4f}")
+    print("-" * 80)
+    print(f"{'task_type':<22} | {'count':>5} | {'avg':>7} | {'major':>7} | {'best':>7}")
+    print("-" * 80)
+    for k in TASK_TYPES_ORDER:
+        r = by_task_results[k]
+        print(
+            f"{k:<22} | {r['count']:>5d} | {r['avg_acc']:>7.4f} | "
+            f"{r['majority_acc']:>7.4f} | {r['best_acc']:>7.4f}"
         )
-        output_dir = f"{args.output_dir}/{model_short_name}"
-        os.makedirs(output_dir, exist_ok=True)
+    print("=" * 80)
 
-        detail_path = os.path.join(output_dir, f"{base_name}.results.json")
-        metric_path = os.path.join(output_dir, f"{base_name}.metrics.json")
-        with open(detail_path, "w", encoding="utf-8") as f:
-            json.dump(detailed, f, indent=2, ensure_ascii=False)
-        with open(metric_path, "w", encoding="utf-8") as f:
-            json.dump(final, f, indent=2, ensure_ascii=False)
+    # ---- save ----
+    t = time.localtime()
+    tag = f".{args.tag}" if args.tag else ""
+    base_name = (
+        f"rag_conflicts.{t.tm_mon}.{t.tm_mday},{t.tm_hour}:{t.tm_min}"
+        f".rollout{rollout_num}{tag}"
+    )
+    output_dir = f"{args.output_dir}/{model_short_name}"
+    os.makedirs(output_dir, exist_ok=True)
 
-        print(f"Saved variant {variant}:")
-        print(f"  details: {detail_path}")
-        print(f"  metrics: {metric_path}")
+    detail_path = os.path.join(output_dir, f"{base_name}.results.json")
+    metric_path = os.path.join(output_dir, f"{base_name}.metrics.json")
+    with open(detail_path, "w", encoding="utf-8") as f:
+        json.dump(detailed, f, indent=2, ensure_ascii=False)
+    with open(metric_path, "w", encoding="utf-8") as f:
+        json.dump(final, f, indent=2, ensure_ascii=False)
 
-        all_variants_summary[variant] = final
-
-    # ====== Cross-variant summary ======
-    if len(args.prompt_variant) > 1:
-        print("\n" + "*" * 80)
-        print("* Cross-variant summary")
-        print("*" * 80)
-        header = (
-            f"{'variant':<8} | {'overall_avg':>11} | "
-            f"{'normal':>7} | {'outdated':>9} | {'abstain':>8}"
-        )
-        print(header)
-        print("-" * len(header))
-        for v, f in all_variants_summary.items():
-            o = f["overall"]
-            t = f["by_task_type"]
-            print(
-                f"{v:<8} | {o['avg_acc']:>11.4f} | "
-                f"{t['answerable_normal']['avg_acc']:>7.4f} | "
-                f"{t['answerable_outdated']['avg_acc']:>9.4f} | "
-                f"{t['abstain']['avg_acc']:>8.4f}"
-            )
-        print("*" * 80)
+    print(f"Saved:")
+    print(f"  details: {detail_path}")
+    print(f"  metrics: {metric_path}")
 
 
 if __name__ == "__main__":

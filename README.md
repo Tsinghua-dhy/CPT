@@ -437,9 +437,9 @@ also cite verl:
 ```bibtex
 @article{li2026cpt,
   title         = {Enhancing Model Metacognition via Cognitive Pairwise Training},
-  author        = {Li, Weitao and Zhou, Hao and Lei, Xuanyu and Meng, Fandong
-                   and Ren, Jingyi and Wang, Ante and Wang, Xiaolong and Luo, Fuwen
-                   and Zhang, Yuanchi and Yang, Guangwen and Gan, Lin
+  author        = {Li, Weitao and Zhou, Hao and Lei, Xuanyu and Meng, Fandong 
+                   and Liu, Yuanhang and Ren, Jingyi and Wang, Ante and Wang, Xiaolong 
+                   and Luo, Fuwen and Zhang, Yuanchi and Yang, Guangwen and Gan, Lin
                    and Ma, Weizhi and Liu, Yang},
   journal       = {arXiv preprint arXiv:XXXX.XXXXX},
   year          = {2026},
@@ -453,7 +453,7 @@ also cite verl:
 
 ## 👥 Authors
 
-**Weitao Li**¹², Hao Zhou, Xuanyu Lei¹², Fandong Meng, Jingyi Ren¹², Ante Wang², Xiaolong Wang¹², Fuwen Luo¹², Yuanchi Zhang, Guangwen Yang¹, Lin Gan¹, **Weizhi Ma**²†, **Yang Liu**¹²†
+**Weitao Li**¹², Hao Zhou, Xuanyu Lei¹², Fandong Meng, Yuanhang Liu¹², Jingyi Ren¹², Ante Wang², Xiaolong Wang¹², Fuwen Luo¹², Yuanchi Zhang, Guangwen Yang¹, Lin Gan¹, **Weizhi Ma**²†, **Yang Liu**¹²†
 
 <sub>¹ Dept. of CS & Tech., Institute for AI, Tsinghua University &nbsp;·&nbsp; ² Institute for AI Industry Research (AIR), Tsinghua University</sub>
 

@@ -5,7 +5,10 @@ update from https://github.com/hotpotqa/hotpot/blob/master/hotpot_evaluate_v1.py
 
 import pdb
 import sys
-import ujson as json
+try:
+    import ujson as json
+except ImportError:
+    import json
 import re
 import string
 from collections import Counter

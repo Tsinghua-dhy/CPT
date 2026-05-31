@@ -9,11 +9,16 @@ detection paths:
 """
 import os
 import re
+import sys
 import time
 import httpx
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Tuple
+
+# Make eval/utils/ importable so we can reuse `prompts.py`
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils'))
+
 from prompts import (
     ABSTENTION_KEYWORDS,
     get_abstention_judge_prompt,

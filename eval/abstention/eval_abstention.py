@@ -31,6 +31,9 @@ import subprocess
 from collections import defaultdict
 from typing import List, Dict, Optional
 
+# Make eval/utils/ importable so we can reuse `prompts.py` etc.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils'))
+
 import gc
 
 
