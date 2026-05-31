@@ -16,15 +16,14 @@ from tqdm import tqdm
 
 from datasets import Dataset
 # Make eval/utils/ importable so we can reuse `math_equal.py`
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'utils'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils'))
 from math_equal import eval_math_with_gpt, compute_score
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from transformers import AutoTokenizer
-from vllm import LLM, SamplingParams   # (vLLM)
+from vllm import LLM, SamplingParams
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -44,7 +43,7 @@ def parse_args():
     parser.add_argument("--top_k", type=int, default=10)
     parser.add_argument("--topk", type=int, default=10)
     parser.add_argument("--max_tokens", type=int, default=3072)
-    parser.add_argument("--use_llm_judge", action="store_true", 
+    parser.add_argument("--use_llm_judge", action="store_true",
                         help="Use LLM as a judge for evaluation (GPT-based). Only effective for math500, minervamath, olympiad datasets. Other datasets always use rule-based evaluation.")
     parser.add_argument("--use_chat_template", action="store_true",
                         help="Force using chat template for instruct models. If not set, auto-detect based on model name.")
@@ -63,7 +62,7 @@ def is_instruct_model(model_name):
 
 def process_text(example, model_short_name, tokenizer, use_chat_template=False):
     question_raw = example["question"]
-    
+
     if use_chat_template:
         # Instruct model: use chat template
         instruct_prompt = f"""You are a helpful math problem solving expert. Please solve this problem step by step and put your final answer within \\boxed{{}}.
@@ -79,7 +78,7 @@ The final answer should be enclosed within \\boxed{{}}.
 
 User:{question_raw}
 Assistant:"""
-    
+
     example["chat_prompt"] = prompt
     return example
 
@@ -129,7 +128,7 @@ def main():
     num_gpus = torch.cuda.device_count()
     llm = LLM(model=model_path, tensor_parallel_size=num_gpus,
               gpu_memory_utilization=args.gpu_memory_rate, trust_remote_code=True)
-    
+
     # Determine whether to use chat template
     use_chat_template = args.use_chat_template or is_instruct_model(model_path)
     print(f"Model: {model_path}")
@@ -142,7 +141,7 @@ def main():
         if len(args.rollout_nums) != len(args.src_files):
             raise ValueError(f"rollout_nums length ({len(args.rollout_nums)}) must match src_files length ({len(args.src_files)})")
         rollout_nums = args.rollout_nums
-    
+
     print(f"Files and their rollout times:")
     for src_file, rollout_num in zip(args.src_files, rollout_nums):
         print(f"  {src_file}: {rollout_num} rollouts")
@@ -161,13 +160,13 @@ def main():
                     break
         print("All Data Length:", len(data_ori_all))
 
-        # Store multi-rollout results per question
+        # Per-question rollout buffer
         # question_rollouts[question_idx] = [{"pred_ans": ..., "gen_text": ..., "is_equal": ...}, ...]
         question_rollouts = defaultdict(list)
 
         # ==== Batch-generate all rollouts ====
         print(f"\n{'='*60}\nGenerating {rollout_num} rollouts for all questions in batch\n{'='*60}")
-        
+
         chunk_size = 20000
         chunk_num = (len(data_ori_all) + chunk_size - 1) // chunk_size
 
@@ -181,14 +180,14 @@ def main():
 
             # Repeat each question's prompt rollout_num times
             prompts = []
-            prompt_to_question_map = []  # (question_idx, rollout_idx) for each prompt
+            prompt_to_question_map = []  # (question_idx, rollout_idx) per prompt
             for i, item in enumerate(data):
                 for rollout_idx in range(rollout_num):
                     prompts.append(item["chat_prompt"])
                     prompt_to_question_map.append((h * chunk_size + i, rollout_idx))
-            
-            print(f"  Generating {len(prompts)} outputs ({len(data)} questions × {rollout_num} rollouts)")
-            
+
+            print(f"  Generating {len(prompts)} outputs ({len(data)} questions x {rollout_num} rollouts)")
+
             sampling_params = SamplingParams(
                 temperature=args.temp, top_p=args.top_p, top_k=args.top_k,
                 max_tokens=args.max_tokens, stop=["<|im_end|>", "<|endoftext|>"]
@@ -205,7 +204,7 @@ def main():
                 pred = extract_answer_math(gen_text)
                 if pred == "":
                     pred = "I don't know."
-                
+
                 question_rollouts[global_idx].append({
                     "question": q,
                     "answer": a,
@@ -217,13 +216,13 @@ def main():
 
         # ==== Batch-evaluate all rollouts ====
         print("\n== Evaluating all rollouts in batch ==")
-        
+
         # Collect all items to be evaluated
         all_golden_answers = []
         all_pred_answers = []
         all_questions = []
         eval_map = []  # (question_idx, rollout_idx) per evaluation result
-        
+
         for q_idx in sorted(question_rollouts.keys()):
             rollouts = question_rollouts[q_idx]
             for rollout_idx, rollout in enumerate(rollouts):
@@ -231,23 +230,23 @@ def main():
                 all_pred_answers.append(rollout["pred_ans"])
                 all_questions.append(rollout["question"])
                 eval_map.append((q_idx, rollout_idx))
-        
+
         print(f"  Total evaluations: {len(all_golden_answers)}")
-        
+
         # Only math500/minervamath/olympiad use the LLM-as-a-judge fallback when
         # --use_llm_judge is set. Other datasets (amc22/23, aime24/25, ...) always
         # use rule-based evaluation.
         llm_judge_datasets = ["math500", "minervamath", "olympiad", "math_all"]
         dataset_supports_llm_judge = any(ds in src_file.lower() for ds in llm_judge_datasets)
-        
+
         # Decide based on flag + dataset type
         use_llm_for_this_dataset = args.use_llm_judge and dataset_supports_llm_judge
-        
+
         if use_llm_for_this_dataset:
             print(f"  Using LLM as a judge (GPT-based evaluation) for dataset: {src_file}")
             # Batch evaluation
             eval_results = eval_math_with_gpt(all_golden_answers, all_pred_answers, all_questions)
-            
+
             # Dispatch results back to each rollout
             for idx, (q_idx, rollout_idx) in enumerate(eval_map):
                 question_rollouts[q_idx][rollout_idx]["is_equal"] = eval_results[idx]["is_equal"]
@@ -271,43 +270,43 @@ def main():
 
         # ==== Compute several accuracy metrics ====
         print("\n== Computing metrics ==")
-        
+
         # 1. Majority Voting (Pass@k) -- the standard
         majority_correct = 0
         majority_correct_gpt = 0
-        
+
         # 2. Average Accuracy -- mean over rollouts
         all_correct = []
         all_correct_gpt = []
-        
+
         # 3. Best-of-N -- correct if any rollout is correct
         best_correct = 0
         best_correct_gpt = 0
-        
+
         # 4. Detailed results to save
         all_finished = []
-        
+
         for q_idx in sorted(question_rollouts.keys()):
             rollouts = question_rollouts[q_idx]
-            
+
             # Aggregate this question's rollouts
             is_equal_list = [r["is_equal"] for r in rollouts]
             is_equal_gpt_list = [r["is_equal_gpt"] for r in rollouts]
-            
+
             # Majority Voting
             majority_vote = 1 if sum(is_equal_list) > len(is_equal_list) / 2 else 0
             majority_vote_gpt = 1 if sum(is_equal_gpt_list) > len(is_equal_gpt_list) / 2 else 0
             majority_correct += majority_vote
             majority_correct_gpt += majority_vote_gpt
-            
+
             # Average accuracy
             all_correct.extend(is_equal_list)
             all_correct_gpt.extend(is_equal_gpt_list)
-            
+
             # Best-of-N
             best_correct += (1 if any(is_equal_list) else 0)
             best_correct_gpt += (1 if any(is_equal_gpt_list) else 0)
-            
+
             # Save detailed results for every rollout
             for rollout_idx, rollout in enumerate(rollouts):
                 all_finished.append({
@@ -324,41 +323,41 @@ def main():
                         "majority_vote_gpt": majority_vote_gpt,
                     }
                 })
-        
+
         num_questions = len(question_rollouts)
-        
+
         overall_results = {
             "rollout_num": rollout_num,
             "num_questions": num_questions,
             "total_generations": len(all_finished),
-            
+
             # Primary: Majority Voting
             "majority_voting_acc": float(majority_correct / num_questions) if num_questions > 0 else 0.0,
             "majority_voting_acc_gpt": float(majority_correct_gpt / num_questions) if num_questions > 0 else 0.0,
-            
+
             # Reference: Average Accuracy
             "average_acc": float(np.mean(all_correct)) if len(all_correct) > 0 else 0.0,
             "average_acc_gpt": float(np.mean(all_correct_gpt)) if len(all_correct_gpt) > 0 else 0.0,
-            
+
             # Reference: Best-of-N
             "best_of_n_acc": float(best_correct / num_questions) if num_questions > 0 else 0.0,
             "best_of_n_acc_gpt": float(best_correct_gpt / num_questions) if num_questions > 0 else 0.0,
-            
+
             "query_latency": f"{(time.time()-t_start)/len(all_finished)*1000:.0f} ms"
         }
-        
+
         print(f"\n{'='*60}")
         print(f"Results for {src_file}:")
         print(f"  Rollout: {rollout_num}x")
         print(f"  Questions: {num_questions}")
         print(f"  Majority Voting Acc: {overall_results['majority_voting_acc']:.4f}")
         print(f"  Majority Voting Acc GPT: {overall_results['majority_voting_acc_gpt']:.4f}")
-        print(f"  Average Acc (reference): {overall_results['average_acc']:.4f}")
-        print(f"  Best-of-N Acc (reference): {overall_results['best_of_n_acc']:.4f}")
+        print(f"  Average Acc: {overall_results['average_acc']:.4f}")
+        print(f"  Best-of-N Acc: {overall_results['best_of_n_acc']:.4f}")
         print(f"{'='*60}\n")
-        
+
         final_metrics = {"overall": overall_results}
-        
+
         # ==== Save results ====
         t = time.localtime()
         split = "test"
