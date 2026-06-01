@@ -2,7 +2,7 @@
 
 # Cognitive Pairwise Training (CPT)
 
-### *Enhancing Model Metacognition via Cognitive Pairwise Training*
+### *Enhancing LLM Metacognition via Cognitive Pairwise Training*
 
 [![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-B31B1B.svg)](https://arxiv.org/abs/XXXX.XXXXX)
 [![Paper PDF](https://img.shields.io/badge/Paper-PDF-EA4335.svg)](./paper.pdf)
