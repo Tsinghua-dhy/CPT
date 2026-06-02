@@ -4,7 +4,7 @@
 
 ### *Enhancing LLM Metacognition via Cognitive Pairwise Training*
 
-[![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-B31B1B.svg)](https://arxiv.org/abs/XXXX.XXXXX)
+[![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-B31B1B.svg)](https://arxiv.org/abs/2606.00869)
 [![Paper PDF](https://img.shields.io/badge/Paper-PDF-EA4335.svg)](./paper.pdf)
 [![Status](https://img.shields.io/badge/Status-Preprint-743482.svg)]()
 [![Scales](https://img.shields.io/badge/Models-3B%20→%2032B-743482.svg)]()
@@ -441,9 +441,9 @@ also cite verl:
                    and Liu, Yuanhang and Ren, Jingyi and Wang, Ante and Wang, Xiaolong 
                    and Luo, Fuwen and Zhang, Yuanchi and Yang, Guangwen and Gan, Lin
                    and Ma, Weizhi and Liu, Yang},
-  journal       = {arXiv preprint arXiv:XXXX.XXXXX},
+  journal       = {arXiv preprint arXiv:2606.00869},
   year          = {2026},
-  eprint        = {XXXX.XXXXX},
+  eprint        = {2606.00869},
   archivePrefix = {arXiv},
   primaryClass  = {cs.CL}
 }
