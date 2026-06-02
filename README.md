@@ -4,7 +4,7 @@
 
 ### *Enhancing LLM Metacognition via Cognitive Pairwise Training*
 
-[![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-B31B1B.svg)](https://arxiv.org/abs/2606.00869)
+[![arXiv](https://img.shields.io/badge/arXiv-2606.00869-B31B1B.svg)](https://arxiv.org/abs/2606.00869)
 [![Paper PDF](https://img.shields.io/badge/Paper-PDF-EA4335.svg)](./paper.pdf)
 [![Status](https://img.shields.io/badge/Status-Preprint-743482.svg)]()
 [![Scales](https://img.shields.io/badge/Models-3B%20→%2032B-743482.svg)]()
